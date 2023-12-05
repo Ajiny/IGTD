@@ -27,24 +27,8 @@ def ID_mapping(l1, l2):
 
 
 def load_example_data():
-    res = pd.read_csv('../Data/Example_Drug_Response_Data.txt', sep='\t', engine='c',
+    res = pd.read_csv('../MyData/Example_Drug_Response_Data.txt', sep='\t', engine='c',
                       na_values=['na', '-', ''], header=0, index_col=None)
-
-    files = os.listdir('../Data/Example_Drug_Descriptor_Image_Data/')
-    image = np.empty((len(files), 50, 50, 1))
-    sample = []
-    id = []
-    for i in range(len(files)):
-        if files[i].split('.')[1] == 'txt' and files[i].split('_')[0] == 'Drug':
-            id.append(i)
-            data = pd.read_csv('../Data/Example_Drug_Descriptor_Image_Data/' + files[i], sep='\t', engine='c',
-                               na_values=['na', '-', ''], header=None, index_col=None)
-            image[i, :, :, 0] = data.values
-            sample.append(files[i].split('.txt')[0])
-    image = image[id, :, :, :]
-    drug = {}
-    drug['data'] = image
-    drug['sample'] = sample
 
     files = os.listdir('../Data/Example_Gene_Expression_Image_Data/')
     image = np.empty((len(files), 50, 50, 1))
@@ -62,22 +46,16 @@ def load_example_data():
     ccl['data'] = image
     ccl['sample'] = sample
 
-    return res, ccl, drug
+    return res, ccl
 
 
 
-def get_data_for_cross_validation(res, ccl, drug, sampleID):
+def get_data_for_cross_validation(res, ccl, sampleID):
 
     trainData = []
     valData = []
     testData = []
 
-    train_idd = ID_mapping(drug['sample'], res.iloc[sampleID['trainID'], :].Drug)
-    trainData.append(drug['data'][train_idd, :, :, :])
-    val_idd = ID_mapping(drug['sample'], res.iloc[sampleID['valID'], :].Drug)
-    valData.append(drug['data'][val_idd, :, :, :])
-    test_idd = ID_mapping(drug['sample'], res.iloc[sampleID['testID'], :].Drug)
-    testData.append(drug['data'][test_idd, :, :, :])
 
     train_idd = ID_mapping(ccl['sample'], res.iloc[sampleID['trainID'], :].CCL)
     trainData.append(ccl['data'][train_idd, :, :, :])
@@ -93,15 +71,15 @@ def get_data_for_cross_validation(res, ccl, drug, sampleID):
     train = {}
     train['data'] = trainData
     train['label'] = trainLabel
-    train['sample'] = res.iloc[sampleID['trainID'], :].CCL + '|' + res.iloc[sampleID['trainID'], :].Drug
+    train['sample'] = res.iloc[sampleID['trainID'], :].CCL
     val = {}
     val['data'] = valData
     val['label'] = valLabel
-    val['sample'] = res.iloc[sampleID['valID'], :].CCL + '|' + res.iloc[sampleID['valID'], :].Drug
+    val['sample'] = res.iloc[sampleID['valID'], :].CCL
     test = {}
     test['data'] = testData
     test['label'] = testLabel
-    test['sample'] = res.iloc[sampleID['testID'], :].CCL + '|' + res.iloc[sampleID['testID'], :].Drug
+    test['sample'] = res.iloc[sampleID['testID'], :].CCL
 
     return train, val, test
 
@@ -323,154 +301,6 @@ class CNN2D_Classifier():
         print(model.summary())
         self.model = model
 
-
-
-def CNN2D_Regression_Analysis(train, resultFolder, para, val=None, test=None):
-    '''
-    This function does CNN2D regression analysis without HPO.
-
-    Input:
-    train: a dictionary of three elements. data is an array of (sample, height, width).
-        label is a series of the prediction target. sample is an array of sample names.
-    val: a dictionary for validation data.
-    resultFolder: directory to save models, features, and results
-    para: parameters used for model training
-    test: a dictionary for testing data. Default is None.
-
-    Return:
-    predResult: a dictionary including three series, which are prediction results on the training, validation,
-        and testing sets.
-    perM: an array of training and validation losses with different dropout rates and epochs.
-    perf: a 3 by 7 data frame including the prediction performance on training, validation, and testing sets.
-    winningModel: a string giving the epoch number and dropout rate of the best model with the smallest validation loss.
-    '''
-
-    if os.path.exists(resultFolder):
-        shutil.rmtree(resultFolder)
-    os.mkdir(resultFolder)
-
-    trainData = train['data']
-    trainLabel = train['label']
-    trainSample = train['sample']
-
-    if isinstance(trainData, list):
-        batch_size = calculate_batch_size(trainData[0].shape[0], para)
-    else:
-        batch_size = calculate_batch_size(trainData.shape[0], para)
-
-    # batch_size = 5000
-    # print(batch_size)
-
-    if val is not None:
-        valData = val['data']
-        valLabel = val['label']
-        valSample = val['sample']
-    else:
-        valData = None
-        valLabel = None
-        valSample = None
-
-    if test is not None:
-        testData = test['data']
-        testSample = test['sample']
-        if test['label'] is not None:
-            testLabel = test['label']
-        else:
-            testLabel = None
-    else:
-        testData = None
-        testLabel = None
-        testSample = None
-
-    if isinstance(trainData, list):
-        input_data_dim = []
-        for i in range(len(trainData)):
-            input_data_dim.append([trainData[i].shape[1], trainData[i].shape[2]])
-    else:
-        input_data_dim = [[trainData.shape[1], trainData.shape[2]]]
-
-    perM = {}
-    for i in ['train', 'val']:
-        perM[i] = np.empty((len(para['drop']), para['epochs']))
-        perM[i].fill(np.inf)
-        perM[i] = pd.DataFrame(perM[i], index=['dropout_' + str(j) for j in para['drop']],
-            columns=['epoch_' + str(j) for j in range(para['epochs'])])
-
-    for dpID in range(len(para['drop'])):
-        label = 'dropout_' + str(para['drop'][dpID])
-        print(label)
-
-        if val is not None:
-            monitor = 'val_loss'
-        else:
-            monitor = 'loss'
-        train_logger = CSVLogger(resultFolder + '/log_dropout_' + str(para['drop'][dpID]) + '.csv')
-        model_saver = ModelCheckpoint(resultFolder + '/model_dropout_' + str(para['drop'][dpID]) + '.h5',
-                                      monitor=monitor, save_best_only=True, save_weights_only=False)
-        reduce_lr = ReduceLROnPlateau(monitor=monitor, factor=para['rlr_factor'], patience=para['rlr_patience'],
-                                      verbose=1, mode='auto', min_delta=para['rlr_min_delta'],
-                                      cooldown=para['rlr_cooldown'], min_lr=para['rlr_min_lr'])
-        early_stop = EarlyStopping(monitor=monitor, patience=para['es_patience'], min_delta=para['es_min_delta'],
-                                   verbose=1)
-        callbacks = [model_saver, train_logger, reduce_lr, early_stop]
-
-        temp = CNN2D_Regressor(para, input_data_dim, para['drop'][dpID])
-
-        if val is not None:
-            history = temp.model.fit(x=trainData, y=trainLabel, batch_size=batch_size, epochs=para['epochs'],
-                verbose=para['verbose'], callbacks=callbacks, validation_data=(valData, valLabel), shuffle=True)
-        else:
-            history = temp.model.fit(x=trainData, y=trainLabel, batch_size=batch_size, epochs=para['epochs'],
-                verbose=para['verbose'], callbacks=callbacks, validation_data=None, shuffle=True)
-        numEpoch = len(history.history['loss'])
-        i = np.where(perM['train'].index == label)[0]
-        perM['train'].iloc[i, :numEpoch] = history.history['loss']
-        if val is not None:
-            numEpoch = len(history.history['val_loss'])
-            i = np.where(perM['val'].index == label)[0]
-            perM['val'].iloc[i, :numEpoch] = history.history['val_loss']
-
-        backend.clear_session()
-
-    if val is not None:
-        dpID, epID = np.unravel_index(np.argmin(perM['val'].values, axis=None), perM['val'].shape)
-    else:
-        dpID, epID = np.unravel_index(np.argmin(perM['train'].values, axis=None), perM['train'].shape)
-    model = load_model(resultFolder + '/model_dropout_' + str(para['drop'][dpID]) + '.h5')
-
-    for i in range(len(para['drop'])):
-        if i == dpID:
-            continue
-        os.remove(resultFolder + '/model_dropout_' + str(para['drop'][i]) + '.h5')
-        os.remove(resultFolder + '/log_dropout_' + str(para['drop'][i]) + '.csv')
-
-    predResult = {}
-    if test is not None:
-        predResult['test'] = pd.DataFrame(model.predict(testData), index=testSample, columns=['prediction'])
-    predResult['train'] = pd.DataFrame(model.predict(trainData), index=trainSample, columns=['prediction'])
-    if val is not None:
-        predResult['val'] = pd.DataFrame(model.predict(valData), index=valSample, columns=['prediction'])
-
-    backend.clear_session()
-
-    perf = np.empty((3, 7))
-    perf.fill(np.nan)
-    perf = pd.DataFrame(perf, columns=['R2', 'MSE', 'MAE', 'pCor', 'pCorPvalue', 'sCor', 'sCorPvalue'],
-                        index=['train', 'val', 'test'])
-    for k in ['train', 'val', 'test']:
-        if (eval(k + 'Data') is None) or (eval(k + 'Label') is None):
-            continue
-        perf.loc[k, 'R2'] = r2_score(eval(k + 'Label'), predResult[k].values[:, 0])
-        perf.loc[k, 'MSE'] = mean_squared_error(eval(k + 'Label'), predResult[k].values[:, 0])
-        perf.loc[k, 'MAE'] = mean_absolute_error(eval(k + 'Label'), predResult[k].values[:, 0])
-        rho, pval = stats.pearsonr(eval(k + 'Label'), predResult[k].values[:, 0])
-        perf.loc[k, 'pCor'] = rho
-        perf.loc[k, 'pCorPvalue'] = pval
-        rho, pval = stats.spearmanr(eval(k + 'Label'), predResult[k].values[:, 0])
-        perf.loc[k, 'sCor'] = rho
-        perf.loc[k, 'sCorPvalue'] = pval
-
-    return predResult, perM, perf, 'dropout_' + str(para['drop'][dpID]) + '_epoch_' + str(epID + 1), batch_size
 
 
 
