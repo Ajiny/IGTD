@@ -4,7 +4,7 @@ from IGTD_Functions import min_max_transform, table_to_image, select_features_by
 
 
 # 99 columns
-num_row = 10    # Number of pixel rows in image representation
+num_row = 0    # Number of pixel rows in image representation
 num_col = 10    # Number of pixel columns in image representation
 num = num_row * num_col # Number of features to be included for analysis, which is also the total number of pixels in image representation
 save_image_size = 3 # Size of pictures (in inches) saved during the execution of IGTD algorithm.
